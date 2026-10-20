@@ -1,0 +1,99 @@
+name: Operlity image
+
+# Builds the MinIO server from this repository's source and publishes ghcr.io/operlity/minio.
+# Trigger: push a tag named operlity-<version> (e.g. operlity-2026.10.20.1 -> image tag 2026.10.20.1),
+# or run it manually (publishes only the sha-<commit> tag). See OPERLITY.md.
+
+on:
+  push:
+    tags:
+      - "operlity-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: operlity-image-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/operlity/minio
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Release metadata
+        id: meta
+        run: |
+          set -eu
+          commit="$(git log -1 --format=%H)"
+          version="$(TZ=UTC git log -1 --date=format-local:%Y-%m-%dT%H:%M:%SZ --format=%cd)"
+          short="$(echo "$commit" | cut -c1-12)"
+          tags="${IMAGE}:sha-${short}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            tags="${tags},${IMAGE}:${GITHUB_REF_NAME#operlity-}"
+          fi
+          {
+            echo "commit=${commit}"
+            echo "version=${version}"
+            echo "tags=${tags}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: Dockerfile.operlity
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          build-args: |
+            MINIO_VERSION=${{ steps.meta.outputs.version }}
+            MINIO_COMMIT=${{ steps.meta.outputs.commit }}
+          provenance: false
+
+      - name: Smoke test
+        run: |
+          set -eu
+          ref="${IMAGE}@${{ steps.build.outputs.digest }}"
+          docker run -d --name minio-smoke -e MINIO_ROOT_USER=smoke-user -e MINIO_ROOT_PASSWORD=smoke-password-123 "$ref"
+          for i in $(seq 1 30); do
+            if docker exec minio-smoke wget -qO- http://127.0.0.1:9000/minio/health/live >/dev/null 2>&1; then
+              echo "MinIO is live"; docker rm -f minio-smoke >/dev/null; exit 0
+            fi
+            sleep 2
+          done
+          docker logs minio-smoke; docker rm -f minio-smoke >/dev/null; exit 1
+
+      - name: Summary
+        run: |
+          {
+            echo "### ghcr.io/operlity/minio"
+            echo ""
+            echo "- Tags: \`${{ steps.meta.outputs.tags }}\`"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo "- Commit: \`${{ steps.meta.outputs.commit }}\`"
+            echo ""
+            echo "Pin in Express as \`ghcr.io/operlity/minio:<tag>@${{ steps.build.outputs.digest }}\`."
+          } >> "$GITHUB_STEP_SUMMARY"

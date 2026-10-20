@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1
+#
+# Operlity build of the MinIO server, compiled from this repository's source (no upstream binaries are downloaded).
+# Published by .github/workflows/operlity-image.yml as ghcr.io/operlity/minio. See OPERLITY.md.
+#
+# The release metadata normally produced by buildscripts/gen-ldflags.go needs the .git directory, which
+# .dockerignore excludes, so the workflow passes the commit ID and commit time as build arguments instead.
+
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS build
+
+ARG TARGETOS
+ARG TARGETARCH
+# Commit time in RFC 3339 UTC (e.g. 2026-02-12T20:18:48Z) and the full commit ID, supplied by the workflow.
+ARG MINIO_VERSION
+ARG MINIO_COMMIT
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+RUN set -eu; \
+    : "${MINIO_VERSION:?MINIO_VERSION build argument is required}"; \
+    : "${MINIO_COMMIT:?MINIO_COMMIT build argument is required}"; \
+    release_tag="OPERLITY.$(echo "$MINIO_VERSION" | tr ':' '-')"; \
+    year="$(echo "$MINIO_VERSION" | cut -c1-4)"; \
+    short_commit="$(echo "$MINIO_COMMIT" | cut -c1-12)"; \
+    CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" go build -tags kqueue -trimpath \
+      -ldflags "-s -w \
+        -X github.com/minio/minio/cmd.Version=${MINIO_VERSION} \
+        -X github.com/minio/minio/cmd.CopyrightYear=${year} \
+        -X github.com/minio/minio/cmd.ReleaseTag=${release_tag} \
+        -X github.com/minio/minio/cmd.CommitID=${MINIO_COMMIT} \
+        -X github.com/minio/minio/cmd.ShortCommitID=${short_commit}" \
+      -o /out/minio .
+
+FROM alpine:3.22
+
+# busybox wget stays available for container health checks (e.g. /minio/health/live).
+RUN apk add --no-cache ca-certificates \
+ && addgroup -S -g 1000 minio \
+ && adduser -S -D -H -u 1000 -G minio -h /data minio \
+ && mkdir -p /data \
+ && chown minio:minio /data
+
+COPY --from=build /out/minio /usr/bin/minio
+COPY LICENSE NOTICE /usr/share/licenses/minio/
+
+LABEL org.opencontainers.image.source="https://github.com/Operlity/minio" \
+      org.opencontainers.image.title="MinIO (Operlity build)" \
+      org.opencontainers.image.description="MinIO object storage server built from the Operlity/minio fork." \
+      org.opencontainers.image.licenses="AGPL-3.0-or-later"
+
+# Non-root; a fresh named volume mounted at /data inherits the minio ownership from the image.
+USER 1000:1000
+EXPOSE 9000 9001
+VOLUME ["/data"]
+
+ENTRYPOINT ["/usr/bin/minio"]
+CMD ["server", "/data", "--console-address", ":9001"]
