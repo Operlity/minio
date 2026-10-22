@@ -34,6 +34,29 @@ RUN set -eu; \
         -X github.com/minio/minio/cmd.ShortCommitID=${short_commit}" \
       -o /out/minio .
 
+# The MinIO admin API encrypts its payloads, so creating users and policies needs the mc client. It is compiled
+# from the pinned upstream release tag; the build fails unless the tag still resolves to the pinned commit.
+# The tag is annotated: MC_COMMIT is the commit it points at (git ls-remote ... refs/tags/<tag>^{}).
+FROM --platform=$BUILDPLATFORM golang:1.24-alpine AS mc-build
+
+ARG TARGETOS
+ARG TARGETARCH
+ARG MC_TAG=RELEASE.2025-08-13T08-35-41Z
+ARG MC_COMMIT=7394ce0dd2a80935aded936b09fa12cbb3cb8096
+
+RUN apk add --no-cache git
+RUN set -eu; \
+    git clone --quiet --depth 1 --branch "$MC_TAG" https://github.com/minio/mc /mc; \
+    actual="$(git -C /mc rev-parse HEAD)"; \
+    [ "$actual" = "$MC_COMMIT" ] || { echo "mc tag $MC_TAG resolves to $actual, expected $MC_COMMIT" >&2; exit 1; }; \
+    cd /mc; \
+    CGO_ENABLED=0 GOOS="$TARGETOS" GOARCH="$TARGETARCH" go build -trimpath \
+      -ldflags "-s -w \
+        -X github.com/minio/mc/cmd.ReleaseTag=${MC_TAG} \
+        -X github.com/minio/mc/cmd.CommitID=${MC_COMMIT} \
+        -X github.com/minio/mc/cmd.ShortCommitID=$(echo "$MC_COMMIT" | cut -c1-12)" \
+      -o /out/mc .
+
 FROM alpine:3.22
 
 # busybox wget stays available for container health checks (e.g. /minio/health/live).
@@ -44,6 +67,7 @@ RUN apk add --no-cache ca-certificates \
  && chown minio:minio /data
 
 COPY --from=build /out/minio /usr/bin/minio
+COPY --from=mc-build /out/mc /usr/bin/mc
 COPY LICENSE NOTICE /usr/share/licenses/minio/
 
 LABEL org.opencontainers.image.source="https://github.com/Operlity/minio" \

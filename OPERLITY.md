@@ -7,6 +7,14 @@ This fork publishes the MinIO server image that Operlity Express installs as its
   No upstream binaries are downloaded.
 - **Base:** Alpine. It runs as the non-root user `minio` (UID 1000), owns `/data`, and keeps busybox `wget` for
   health checks.
+- **`mc` client:** `/usr/bin/mc`, compiled from source in a separate build stage (`mc-build`) so Express can
+  create users and policies (the MinIO admin API encrypts its payloads). It is pinned by the build arguments
+  `MC_TAG` (`RELEASE.2025-08-13T08-35-41Z`) and `MC_COMMIT` (`7394ce0dd2a80935aded936b09fa12cbb3cb8096`, the
+  commit the annotated tag points at); the build fails if the tag no longer resolves to that commit. To move to a
+  newer release, change both defaults after checking
+  `git ls-remote https://github.com/minio/mc 'refs/tags/<tag>^{}'`. `mc` is built with the same Go toolchain
+  as the server (`golang:1.24-alpine`). It needs a writable config directory when run as UID 1000, for example
+  `MC_CONFIG_DIR=/tmp/.mc`.
 - **Default command:** `server /data --console-address :9001` (S3 API on 9000, console on 9001).
 - **Licence:** GNU AGPL v3 (see `LICENSE`). The source for every published image is this public repository at the
   commit named in the image's tags and build summary.
