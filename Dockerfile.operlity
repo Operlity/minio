@@ -57,6 +57,8 @@ RUN set -eu; \
         -X github.com/minio/mc/cmd.ShortCommitID=$(echo "$MC_COMMIT" | cut -c1-12)" \
       -o /out/mc .
 
+RUN mkdir -p /out/licenses && cp /mc/LICENSE /out/licenses/LICENSE && { [ ! -f /mc/NOTICE ] || cp /mc/NOTICE /out/licenses/NOTICE; }
+
 FROM alpine:3.22
 
 # busybox wget stays available for container health checks (e.g. /minio/health/live).
@@ -68,6 +70,7 @@ RUN apk add --no-cache ca-certificates \
 
 COPY --from=build /out/minio /usr/bin/minio
 COPY --from=mc-build /out/mc /usr/bin/mc
+COPY --from=mc-build /out/licenses/ /usr/share/licenses/mc/
 COPY LICENSE NOTICE /usr/share/licenses/minio/
 
 LABEL org.opencontainers.image.source="https://github.com/Operlity/minio" \

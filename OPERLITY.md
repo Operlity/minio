@@ -16,8 +16,10 @@ This fork publishes the MinIO server image that Operlity Express installs as its
   as the server (`golang:1.24-alpine`). It needs a writable config directory when run as UID 1000, for example
   `MC_CONFIG_DIR=/tmp/.mc`.
 - **Default command:** `server /data --console-address :9001` (S3 API on 9000, console on 9001).
-- **Licence:** GNU AGPL v3 (see `LICENSE`). The source for every published image is this public repository at the
-  commit named in the image's tags and build summary.
+- **Licence:** the image contains MinIO (this repository, GNU AGPL v3, see `LICENSE`; licence files in
+  `/usr/share/licenses/minio/`) and `mc`, built from upstream `github.com/minio/mc` at the pinned tag and commit,
+  also GNU AGPL v3 (licence files in `/usr/share/licenses/mc/`). The source of MinIO for every published image is
+  this public repository at the commit named in the image's tags and build summary.
 
 ## Publishing a version
 
